@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Oscilloscope R / L / C / RC / RL / RLC + Schéma</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #f5f5f5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px;
+    }
+    h1 {
+      font-size: 20px;
+      margin-bottom: 5px;
+      text-align: center;
+    }
+    .mode-switch {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+      justify-content: center;
+    }
+    .mode-btn {
+      padding: 4px 10px;
+      border-radius: 16px;
+      border: 1px solid #666;
+      background: #222;
+      color: #eee;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .mode-btn.active {
+      background: #00b894;
+      color: #000;
+      border-color: #00b894;
+      font-weight: bold;
+    }
+    .controls {
+      margin-bottom: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+    }
+    label {
+      font-size: 13px;
+    }
+    input {
+      width: 80px;
+    }
+    button.action {
+      padding: 4px 10px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      background: #444;
+      color: #fff;
+      font-size: 13px;
+    }
+    button.action:hover {
+      background: #555;
+    }
+    canvas {
+      border: 1px solid #555;
+      background: #000;
+      max-width: 100%;
+    }
+    .measure {
+      font-size: 12px;
+      margin-top: 6px;
+      text-align: center;
+      color: #ccc;
+      max-width: 800px;
+    }
+    #circuitCanvas {
+      border: none;
+      background: #111;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Oscilloscope R / L / C / RC / RL / RLC – avec schémas</h1>
+
+<div class="mode-switch">
+  <button class="mode-btn active" data-mode="R">R</button>
+  <button class="mode-btn" data-mode="C">C</button>
+  <button class="mode-btn" data-mode="L">L</button>
+  <button class="mode-btn" data-mode="RC">RC</button>
+  <button class="mode-btn" data-mode="RL">RL</button>
+  <button class="mode-btn" data-mode="RLC">RLC</button>
+</div>
+
+<div class="controls">
+  <label>R (Ω) :
+    <input type="number" id="R" value="1000" step="100">
+  </label>
+  <label>L (H) :
+    <input type="number" id="L" value="0.01" step="0.001">
+  </label>
+  <label>C (F) :
+    <input type="number" id="C" value="0.0001" step="0.00001">
+  </label>
+  <label>V (V) :
+    <input type="number" id="V" value="5" step="0.5">
+  </label>
+  <button id="plotBtn" class="action">Tracer</button>
+  <button id="clearBtn" class="action">Reset curseurs</button>
+</div>
+
+<canvas id="graph" width="800" height="400"></canvas>
+
+<div class="measure" id="measureBox">Aucun point sélectionné.</div>
+
+<canvas id="circuitCanvas" width="800" height="200"></canvas>
+
+<script>
+let currentMode = "R";
+
+const canvas = document.getElementById('graph');
+const ctx = canvas.getContext('2d');
+
+const inputR = document.getElementById('R');
+const inputL = document.getElementById('L');
+const inputC = document.getElementById('C');
+const inputV = document.getElementById('V');
+const plotBtn = document.getElementById('plotBtn');
+const clearBtn = document.getElementById('clearBtn');
+const measureBox = document.getElementById('measureBox');
+const modeButtons = document.querySelectorAll('.mode-btn');
+
+const graphState = { x0:40, y0:0, plotWidth:0, plotHeight:0, maxT:1, maxY:1 };
+let points = [];
+
+/* ---------- Axes génériques ---------- */
+function drawAxes(maxT, maxY, yLabel) {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.strokeStyle = "#888";
+  ctx.lineWidth = 1;
+
+  // Axe X
+  ctx.beginPath();
+  ctx.moveTo(40, h - 40);
+  ctx.lineTo(w - 10, h - 40);
+  ctx.stroke();
+
+  // Axe Y
+  ctx.beginPath();
+  ctx.moveTo(40, h - 40);
+  ctx.lineTo(40, 10);
+  ctx.stroke();
+
+  // Graduations X
+  ctx.fillStyle = "#ccc";
+  ctx.font = "11px Arial";
+  const nXTicks = 6;
+  for (let i = 0; i <= nXTicks; i++) {
+    const t = (maxT * i) / nXTicks;
+    const x = 40 + ((w - 60) * i / nXTicks);
+    const yAxis = h - 40;
+
+    ctx.strokeStyle = "#555";
+    ctx.beginPath();
+    ctx.moveTo(x, yAxis - 3);
+    ctx.lineTo(x, yAxis + 3);
+    ctx.stroke();
+    ctx.fillText(t.toFixed(2), x - 10, yAxis + 15);
+  }
+
+  // Graduations Y
+  const nYTicks = 5;
+  for (let j = 0; j <= nYTicks; j++) {
+    const val = (maxY * j) / nYTicks;
+    const y = (h - 40) - ((h - 60) * j / nYTicks);
+    const xAxis = 40;
+
+    ctx.strokeStyle = "#555";
+    ctx.beginPath();
+    ctx.moveTo(xAxis - 3, y);
+    ctx.lineTo(xAxis + 3, y);
+    ctx.stroke();
+    ctx.fillText(val.toFixed(2), 10, y + 3);
+  }
+
+  ctx.fillStyle = "#fff";
+  ctx.fillText("Temps (s)", w / 2 - 30, h - 10);
+  ctx.save();
+  ctx.translate(10, h / 2 + 20);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText(yLabel, 0, 0);
+  ctx.restore();
+
+  graphState.x0 = 40;
+  graphState.y0 = h - 40;
+  graphState.plotWidth = w - 60;
+  graphState.plotHeight = h - 60;
+  graphState.maxT = maxT;
+  graphState.maxY = maxY;
+}
+
+/* ---------- Tracés physiques ---------- */
+
+// R : I(t) = V/R
+function plotR(R, V) {
+  if (R <= 0) R = 1e-3;
+  const I = V / R;
+  const maxT = 1;
+  const maxI = I === 0 ? 1 : Math.abs(I);
+
+  drawAxes(maxT, maxI, "Courant I (A)");
+
+  const { x0, y0, plotWidth, plotHeight } = graphState;
+  ctx.strokeStyle = "#fdcb6e";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+
+  const steps = 200;
+  for (let i = 0; i <= steps; i++) {
+    const t = (maxT * i) / steps;
+    const x = x0 + (plotWidth * t / maxT);
+    const y = y0 - (plotHeight * I / maxI);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  drawCursors();
+}
+
+// C seul : Vc(t) = V (constante, on se met après régime transitoire)
+function plotC(C, V) {
+  const maxT = 1;
+  const maxV = V === 0 ? 1 : Math.abs(V);
+
+  drawAxes(maxT, maxV, "Tension Vc (V)");
+
+  const { x0, y0, plotWidth, plotHeight } = graphState;
+  ctx.strokeStyle = "#fab1a0";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+
+  const steps = 200;
+  for (let i = 0; i <= steps; i++) {
+    const t = (maxT * i) / steps;
+    const x = x0 + (plotWidth * t / maxT);
+    const y = y0 - (plotHeight * V / maxV);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  drawCursors();
+}
+
+// L seul : I(t) = (V/L) t
+function plotL(L, V) {
+  if (L <= 0) L = 1e-3;
+  const maxT = 1;
+  const slope = V / L;
+  const Imax = slope * maxT;
+  const maxI = Imax === 0 ? 1 : Math.abs(Imax);
+
+  drawAxes(maxT, maxI, "Courant I (A)");
+
+  const { x0, y0, plotWidth, plotHeight } = graphState;
+  ctx.strokeStyle = "#74b9ff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+
+  const steps = 200;
+  for (let i = 0; i <= steps; i++) {
+    const t = (maxT * i) / steps;
+    const I = slope * t;
+    const x = x0 + (plotWidth * t / maxT);
+    const y = y0 - (plotHeight * I / maxI);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  drawCursors();
+}
+
+// RC : Vc(t) = V(1 - e^{-t/RC})
+function plotRC(R, C, V) {
+  if (C <= 0) { // pas de C → juste R
+    plotR(R, V);
+    return;
+  }
+  if (R <= 0) { // pas de R → V appliquée directement
+    plotC(C, V);
+    return;
+  }
+
+  const tau = R * C;
+  const maxT = 5 * tau;
+  const maxV = V === 0 ? 1 : Math.abs(V);
+
+  drawAxes(maxT, maxV, "Tension Vc (V)");
+
+  const { x0, y0, plotWidth, plotHeight } = graphState;
+  ctx.strokeStyle = "#00ff88";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+
+  const steps = 400;
+  for (let i = 0; i <= steps; i++) {
+    const t = (maxT * i) / steps;
+    const vc = V * (1 - Math.exp(-t / tau));
+    const x = x0 + (plotWidth * t / maxT);
+    const y = y0 - (plotHeight * vc / maxV);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  drawCursors();
+}
+
+// RL : I(t) = (V/R)(1 - e^{-R t / L})
+function plotRL(R, L, V) {
+  if (L <= 0) { // pas de L
+    plotR(R, V);
+    return;
+  }
+  if (R <= 0) { // pas de R
+    plotL(L, V);
+    return;
+  }
+
+  const tau = L / R;
+  const maxT = 5 * tau;
+  const Iinf = V / R;
+  const maxI = Iinf === 0 ? 1 : Math.abs(Iinf);
+
+  drawAxes(maxT, maxI, "Courant I (A)");
+
+  const { x0, y0, plotWidth, plotHeight } = graphState;
+  ctx.strokeStyle = "#0984e3";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+
+  const steps = 400;
+  for (let i = 0; i <= steps; i++) {
+    const t = (maxT * i) / steps;
+    const I = Iinf * (1 - Math.exp(-t / tau));
+    const x = x0 + (plotWidth * t / maxT);
+    const y = y0 - (plotHeight * I / maxI);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  drawCursors();
+}
+
+// RLC série : forme oscillante amortie (approx)
+function plotRLC(R, L, C, V) {
+  // cas dégénérés → on retombe sur plus simple
+  if (L <= 0 && C > 0) return plotRC(R, C, V);
+  if (C <= 0 && L > 0) return plotRL(R, L, V);
+  if (C <= 0 && L <= 0) return plotR(R, V);
+
+  const w0 = 1 / Math.sqrt(L * C);
+  const zeta = R * Math.sqrt(C / (4 * L)); // amortissement approx
+
+  let maxT, maxI;
+  const I0 = V / (L * w0); // amplitude échelle
+
+  if (zeta >= 1) {
+    // sur-amorti (pas d’oscillations marquées) → forme simple
+    maxT = 5 / (zeta * w0);
+    maxI = Math.abs(V / R) || 1;
+
+    drawAxes(maxT, maxI, "Courant I (A)");
+
+    const { x0, y0, plotWidth, plotHeight } = graphState;
+    ctx.strokeStyle = "#e84393";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    const steps = 400;
+    for (let i = 0; i <= steps; i++) {
+      const t = (maxT * i) / steps;
+      const I = (V / R) * (1 - Math.exp(-zeta * w0 * t));
+      const x = x0 + (plotWidth * t / maxT);
+      const y = y0 - (plotHeight * I / maxI);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    drawCursors();
+    return;
+  }
+
+  const wd = w0 * Math.sqrt(1 - zeta * zeta);
+  maxT = 10 / wd;
+  maxI = Math.abs(I0) || 1;
+
+  drawAxes(maxT, maxI, "Courant I (A)");
+
+  const { x0, y0, plotWidth, plotHeight } = graphState;
+  ctx.strokeStyle = "#e84393";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+
+  const steps = 600;
+  for (let i = 0; i <= steps; i++) {
+    const t = (maxT * i) / steps;
+    const I = I0 * Math.exp(-zeta * w0 * t) * Math.sin(wd * t);
+    const x = x0 + (plotWidth * t / maxT);
+    const y = y0 - (plotHeight * I / maxI);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  drawCursors();
+}
+
+/* ---------- Curseurs ---------- */
+function drawCursors() {
+  if (points.length === 0) return;
+  ctx.save();
+  ctx.lineWidth = 1;
+
+  points.forEach((p, index) => {
+    const color = index === 0 ? "#ffdd00" : "#ff00ff";
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(p.x, 10);
+    ctx.lineTo(p.x, canvas.height - 40);
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4, 0, 2 * Math.PI);
+    ctx.fill();
+  });
+
+  if (points.length === 2) {
+    ctx.strokeStyle = "#00aaff";
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    ctx.lineTo(points[1].x, points[1].y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.restore();
+}
+
+function pixelToData(px, py) {
+  const { x0, y0, plotWidth, plotHeight, maxT, maxY } = graphState;
+  const x = Math.max(x0, Math.min(x0 + plotWidth, px));
+  const y = Math.max(y0 - plotHeight, Math.min(y0, py));
+  const t = ((x - x0) / plotWidth) * maxT;
+  const val = ((y0 - y) / plotHeight) * maxY;
+  return { t, val, x, y };
+}
+
+function updateMeasureBox() {
+  if (points.length === 0) {
+    measureBox.textContent = "Aucun point sélectionné.";
+    return;
+  }
+  let labelY = (currentMode === "R" || currentMode === "L" ||
+                currentMode === "RL" || currentMode === "RLC") ? "I" : "V";
+
+  if (points.length === 1) {
+    const p = points[0];
+    measureBox.innerHTML =
+      `Point 1 : t₁ = ${p.t.toFixed(4)} s, ${labelY}₁ = ${p.val.toFixed(4)} ${labelY}`;
+    return;
+  }
+  const p1 = points[0], p2 = points[1];
+  const dt = p2.t - p1.t;
+  const dv = p2.val - p1.val;
+
+  measureBox.innerHTML =
+    `P1 : t₁ = ${p1.t.toFixed(4)} s, ${labelY}₁ = ${p1.val.toFixed(4)} ${labelY} &nbsp;|&nbsp; ` +
+    `P2 : t₂ = ${p2.t.toFixed(4)} s, ${labelY}₂ = ${p2.val.toFixed(4)} ${labelY}<br>` +
+    `Δt = ${dt.toFixed(4)} s &nbsp;|&nbsp; Δ${labelY} = ${dv.toFixed(4)} ${labelY}`;
+}
+
+function handleClick(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const x = (clientX - rect.left) * (canvas.width / rect.width);
+  const y = (clientY - rect.top) * (canvas.height / rect.height);
+  const d = pixelToData(x, y);
+  if (points.length >= 2) points = [];
+  points.push({ ...d });
+  redraw();
+  updateMeasureBox();
+}
+
+canvas.addEventListener('click', e => handleClick(e.clientX, e.clientY));
+canvas.addEventListener('touchstart', e => {
+  if (e.touches.length > 0) {
+    const t = e.touches[0];
+    handleClick(t.clientX, t.clientY);
+  }
+});
+
+/* ---------- Schémas ---------- */
+const circuitCanvas = document.getElementById('circuitCanvas');
+const cctx = circuitCanvas.getContext('2d');
+
+function clearCircuit() {
+  cctx.clearRect(0, 0, circuitCanvas.width, circuitCanvas.height);
+  cctx.strokeStyle = "#fff";
+  cctx.fillStyle = "#fff";
+  cctx.lineWidth = 3;
+  cctx.font = "16px Arial";
+}
+
+function drawRSchema() {
+  clearCircuit();
+  const h = circuitCanvas.height, y = h / 2;
+
+  cctx.beginPath();
+  cctx.moveTo(50, y); cctx.lineTo(120, y); cctx.stroke();
+  cctx.fillText("V", 80, y - 10);
+
+  cctx.beginPath();
+  cctx.moveTo(120, y);
+  cctx.lineTo(150, y - 15);
+  cctx.lineTo(180, y + 15);
+  cctx.lineTo(210, y - 15);
+  cctx.lineTo(240, y + 15);
+  cctx.lineTo(270, y);
+  cctx.stroke();
+  cctx.fillText("R", 190, y - 20);
+
+  cctx.beginPath();
+  cctx.moveTo(270, y); cctx.lineTo(270, y + 30); cctx.stroke();
+  cctx.moveTo(255, y + 30); cctx.lineTo(285, y + 30);
+  cctx.moveTo(260, y + 37); cctx.lineTo(280, y + 37);
+  cctx.moveTo(265, y + 44); cctx.lineTo(275, y + 44);
+  cctx.stroke();
+}
+
+function drawCSchema() {
+  clearCircuit();
+  const h = circuitCanvas.height, y = h / 2;
+
+  cctx.beginPath();
+  cctx.moveTo(50, y); cctx.lineTo(120, y); cctx.stroke();
+  cctx.fillText("V", 80, y - 10);
+
+  cctx.beginPath();
+  cctx.moveTo(120, y); cctx.lineTo(150, y); cctx.stroke();
+  cctx.beginPath();
+  cctx.moveTo(150, y - 20); cctx.lineTo(150, y + 20); cctx.stroke();
+  cctx.beginPath();
+  cctx.moveTo(180, y - 20); cctx.lineTo(180, y + 20); cctx.stroke();
+  cctx.beginPath();
+  cctx.moveTo(180, y); cctx.lineTo(220, y); cctx.stroke();
+  cctx.fillText("C", 160, y - 25);
+
+  cctx.beginPath();
+  cctx.moveTo(220, y); cctx.lineTo(220, y + 30); cctx.stroke();
+  cctx.moveTo(205, y + 30); cctx.lineTo(235, y + 30);
+  cctx.moveTo(210, y + 37); cctx.lineTo(230, y + 37);
+  cctx.moveTo(215, y + 44); cctx.lineTo(225, y + 44);
+  cctx.stroke();
+}
+
+function drawLSchema() {
+  clearCircuit();
+  const h = circuitCanvas.height, y = h / 2;
+
+  cctx.beginPath();
+  cctx.moveTo(50, y); cctx.lineTo(120, y); cctx.stroke();
+  cctx.fillText("V", 80, y - 10);
+
+  const startX = 120, endX = 260, loops = 4;
+  const loopW = (endX - startX) / loops;
+  cctx.beginPath();
+  cctx.moveTo(startX, y);
+  let x = startX;
+  for (let i = 0; i < loops; i++) {
+    const midX = x + loopW / 2;
+    const nextX = x + loopW;
+    cctx.quadraticCurveTo(midX, y - 20, nextX, y);
+    x = nextX;
+  }
+  cctx.stroke();
+  cctx.fillText("L", (startX + endX) / 2 - 5, y - 28);
+
+  cctx.beginPath();
+  cctx.moveTo(endX, y); cctx.lineTo(endX, y + 30); cctx.stroke();
+  cctx.moveTo(endX - 15, y + 30); cctx.lineTo(endX + 15, y + 30);
+  cctx.moveTo(endX - 10, y + 37); cctx.lineTo(endX + 10, y + 37);
+  cctx.moveTo(endX - 5, y + 44); cctx.lineTo(endX + 5, y + 44);
+  cctx.stroke();
+}
+
+function drawRCSchema() {
+  clearCircuit();
+  const h = circuitCanvas.height, y = h / 2;
+
+  cctx.beginPath();
+  cctx.moveTo(50, y); cctx.lineTo(120, y); cctx.stroke();
+  cctx.fillText("V", 80, y - 10);
+
+  cctx.beginPath();
+  cctx.moveTo(120, y);
+  cctx.lineTo(150, y - 15);
+  cctx.lineTo(180, y + 15);
+  cctx.lineTo(210, y - 15);
+  cctx.lineTo(240, y + 15);
+  cctx.lineTo(270, y);
+  cctx.stroke();
+  cctx.fillText("R", 190, y - 20);
+
+  cctx.beginPath();
+  cctx.moveTo(270, y); cctx.lineTo(300, y); cctx.stroke();
+  cctx.beginPath();
+  cctx.moveTo(300, y - 20); cctx.lineTo(300, y + 20); cctx.stroke();
+  cctx.beginPath();
+  cctx.moveTo(330, y - 20); cctx.lineTo(330, y + 20); cctx.stroke();
+  cctx.beginPath();
+  cctx.moveTo(330, y); cctx.lineTo(370, y); cctx.stroke();
+  cctx.fillText("C", 310, y - 25);
+
+  cctx.beginPath();
+  cctx.moveTo(370, y); cctx.lineTo(370, y + 30); cctx.stroke();
+  cctx.moveTo(355, y + 30); cctx.lineTo(385, y + 30);
+  cctx.moveTo(360, y + 37); cctx.lineTo(380, y + 37);
+  cctx.moveTo(365, y + 44); cctx.lineTo(375, y + 44);
+  cctx.stroke();
+}
+
+function drawRLSchema() {
+  clearCircuit();
+  const h = circuitCanvas.height, y = h / 2;
+
+  cctx.beginPath();
+  cctx.moveTo(50, y); cctx.lineTo(120, y); cctx.stroke();
+  cctx.fillText("V", 80, y - 10);
+
+  cctx.beginPath();
+  cctx.moveTo(120, y);
+  cctx.lineTo(150, y - 15);
+  cctx.lineTo(180, y + 15);
+  cctx.lineTo(210, y - 15);
+  cctx.lineTo(240, y + 15);
+  cctx.lineTo(270, y);
+  cctx.stroke();
+  cctx.fillText("R", 190, y - 20);
+
+  const startX = 270, endX = 410, loops = 4;
+  const loopW = (endX - startX) / loops;
+  cctx.beginPath();
+  cctx.moveTo(startX, y);
+  let x = startX;
+  for (let i = 0; i < loops; i++) {
+    const midX = x + loopW/2;
+    const nextX = x + loopW;
+    cctx.quadraticCurveTo(midX, y - 20, nextX, y);
+    x = nextX;
+  }
+  cctx.stroke();
+  cctx.fillText("L", (startX + endX)/2 - 5, y - 28);
+
+  cctx.beginPath();
+  cctx.moveTo(endX, y); cctx.lineTo(endX, y + 30); cctx.stroke();
+  cctx.moveTo(endX - 15, y + 30); cctx.lineTo(endX + 15, y + 30);
+  cctx.moveTo(endX - 10, y + 37); cctx.lineTo(endX + 10, y + 37);
+  cctx.moveTo(endX - 5, y + 44); cctx.lineTo(endX + 5, y + 44);
+  cctx.stroke();
+}
+
+function drawRLCSchema() {
+  clearCircuit();
+  const h = circuitCanvas.height, y = h / 2;
+
+  cctx.beginPath();
+  cctx.moveTo(50, y); cctx.lineTo(120, y); cctx.stroke();
+  cctx.fillText("V", 80, y - 10);
+
+  cctx.beginPath();
+  cctx.moveTo(120, y);
+  cctx.lineTo(150, y - 15);
+  cctx.lineTo(180, y + 15);
+  cctx.lineTo(210, y - 15);
+  cctx.lineTo(240, y + 15);
+  cctx.lineTo(270, y);
+  cctx.stroke();
+  cctx.fillText("R", 190, y - 20);
+
+  let startX = 270, endX = 360, loops = 3;
+  let loopW = (endX - startX)/loops;
+  cctx.beginPath();
+  cctx.moveTo(startX, y);
+  let x = startX;
+  for (let i = 0; i < loops; i++) {
+    const midX = x + loopW/2;
+    const nextX = x + loopW;
+    cctx.quadraticCurveTo(midX, y - 20, nextX, y);
+    x = nextX;
+  }
+  cctx.stroke();
+  cctx.fillText("L", (startX + endX)/2 - 5, y - 28);
+
+  cctx.beginPath();
+  cctx.moveTo(endX, y); cctx.lineTo(endX + 30, y); cctx.stroke();
+  cctx.beginPath();
+  cctx.moveTo(endX + 30, y - 20); cctx.lineTo(endX + 30, y + 20); cctx.stroke();
+  cctx.beginPath();
+  cctx.moveTo(endX + 60, y - 20); cctx.lineTo(endX + 60, y + 20); cctx.stroke();
+  cctx.beginPath();
+  cctx.moveTo(endX + 60, y); cctx.lineTo(endX + 100, y); cctx.stroke();
+  cctx.fillText("C", endX + 38, y - 25);
+
+  cctx.beginPath();
+  cctx.moveTo(endX + 100, y); cctx.lineTo(endX + 100, y + 30); cctx.stroke();
+  cctx.moveTo(endX + 85, y + 30); cctx.lineTo(endX + 115, y + 30);
+  cctx.moveTo(endX + 90, y + 37); cctx.lineTo(endX + 110, y + 37);
+  cctx.moveTo(endX + 95, y + 44); cctx.lineTo(endX + 105, y + 44);
+  cctx.stroke();
+}
+
+function drawCircuit() {
+  switch (currentMode) {
+    case "R":   drawRSchema();   break;
+    case "C":   drawCSchema();   break;
+    case "L":   drawLSchema();   break;
+    case "RC":  drawRCSchema();  break;
+    case "RL":  drawRLSchema();  break;
+    case "RLC": drawRLCSchema(); break;
+  }
+}
+
+/* ---------- Redraw global ---------- */
+function redraw() {
+  const R = parseFloat(inputR.value);
+  const L = parseFloat(inputL.value);
+  const C = parseFloat(inputC.value);
+  const V = parseFloat(inputV.value);
+
+  switch (currentMode) {
+    case "R":   plotR(R, V);           break;
+    case "C":   plotC(C, V);           break;
+    case "L":   plotL(L, V);           break;
+    case "RC":  plotRC(R, C, V);       break;
+    case "RL":  plotRL(R, L, V);       break;
+    case "RLC": plotRLC(R, L, C, V);   break;
+  }
+  drawCircuit();
+}
+
+/* ---------- Events ---------- */
+plotBtn.addEventListener('click', () => {
+  points = [];
+  updateMeasureBox();
+  redraw();
+});
+
+clearBtn.addEventListener('click', () => {
+  points = [];
+  updateMeasureBox();
+  redraw();
+});
+
+modeButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    modeButtons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode = btn.getAttribute('data-mode');
+    points = [];
+    updateMeasureBox();
+    redraw();
+  });
+});
+
+/* ---------- Init ---------- */
+redraw();
+updateMeasureBox();
+drawCircuit();
+</script>
+
+</body>
+</html>
